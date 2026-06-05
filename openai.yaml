@@ -1,4 +1,0 @@
-interface:
-  display_name: "Design Inspiration Research"
-  short_description: "Turn design briefs into sourced visual directions"
-  default_prompt: "Use $design-inspiration-research to turn my design brief into sourced references, visual analysis, directions, and AI image prompts."
