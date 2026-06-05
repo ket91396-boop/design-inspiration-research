@@ -1,0 +1,19 @@
+.DS_Store
+Thumbs.db
+
+# Local editor and OS files
+.idea/
+.vscode/
+*.swp
+
+# Temporary files
+*.tmp
+*.log
+work/
+outputs/
+
+# Python / Node caches if validation or local tooling is added later
+__pycache__/
+*.pyc
+node_modules/
+
