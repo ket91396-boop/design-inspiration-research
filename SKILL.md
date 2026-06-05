@@ -38,7 +38,7 @@ Always include every standard category, even when the user names one artifact ty
 
 You may mark categories as `primary`, `secondary`, or `wildcard`, but do not omit any category:
 
-- `primary`: directly matches the artifact type or brief.
+- `primary`: directly matches the artifact type or brief. These categories should get visibly deeper search coverage.
 - `secondary`: adjacent and likely useful.
 - `wildcard`: less obvious, but searched to uncover unexpected inspiration.
 
@@ -74,7 +74,15 @@ Use all of these category labels every time:
 
 ## Step 3: Search And Link Images
 
-Browse immediately for every standard category. Prefer primary visual sources and reputable image pages. For each category, find at least 1 strong reference; for primary categories, find about 2-4 strong references. Prioritize the category's preferred sites.
+Browse immediately for every standard category. Prefer primary visual sources and reputable image pages. Prioritize the category's preferred sites.
+
+Use these reference-count targets:
+
+- `primary`: find 4-5 strong references.
+- `secondary`: find 1-2 useful references.
+- `wildcard`: find at least 1 useful reference.
+
+When the user explicitly names an artifact type, that matching category must be `primary`. For example, if the user asks for a poster, `Poster / 海报` should receive deeper coverage than the other categories.
 
 For each reference include:
 
