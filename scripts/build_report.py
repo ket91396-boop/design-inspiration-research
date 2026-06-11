@@ -82,7 +82,17 @@ def text_list(items: Any) -> str:
 
 def comma_list(items: Any) -> str:
     values = [esc(item) for item in as_list(items) if str(item).strip()]
-    return ", ".join(values) if values else '<span class="muted">Not specified</span>'
+    return "、".join(values) if values else '<span class="muted">未指定</span>'
+
+
+def reference_label(key: str, value: Any) -> str:
+    labels = {
+        "source_quality": {"primary": "主要来源", "secondary": "辅助来源", "supplement": "补充参考"},
+        "quality_tier": {"green": "可借鉴", "yellow": "需转化", "red": "避坑参考"},
+        "copyright_risk": {"low": "低风险", "medium": "中风险", "high": "高风险"},
+    }
+    text = str(value or "").strip()
+    return labels.get(key, {}).get(text.lower(), text)
 
 
 def section(title: str, body: str, extra_class: str = "") -> str:
@@ -96,21 +106,21 @@ def render_brief(data: dict[str, Any]) -> str:
         brief = {"summary": brief}
 
     fields = [
-        ("Artifact type", brief.get("artifact_type")),
-        ("Use context", brief.get("use_context")),
-        ("Audience / tone", brief.get("audience_tone")),
-        ("Core symbols", comma_list(brief.get("core_symbols"))),
-        ("Visual risks", comma_list(brief.get("visual_risks"))),
+        ("产物类型", brief.get("artifact_type")),
+        ("使用场景", brief.get("use_context")),
+        ("受众 / 气质", brief.get("audience_tone")),
+        ("核心符号", comma_list(brief.get("core_symbols"))),
+        ("视觉风险", comma_list(brief.get("visual_risks"))),
     ]
     cards = []
     for label, value in fields:
         if value is None:
-            value = '<span class="muted">Not specified</span>'
+            value = '<span class="muted">未指定</span>'
         cards.append(f'<div class="fact"><span>{esc(label)}</span><strong>{value}</strong></div>')
 
     assumptions = data.get("assumptions")
     if assumptions:
-        cards.append(f'<div class="fact wide"><span>Assumptions</span>{text_list(assumptions)}</div>')
+        cards.append(f'<div class="fact wide"><span>假设</span>{text_list(assumptions)}</div>')
     return '<div class="facts">' + "".join(cards) + "</div>"
 
 
@@ -130,10 +140,10 @@ def render_keywords(data: dict[str, Any]) -> str:
             "</tr>"
         )
     if not rows:
-        return '<p class="muted">No keyword categories provided.</p>'
+        return '<p class="muted">暂无关键词分类。</p>'
     return (
         '<div class="table-wrap"><table><thead><tr>'
-        "<th>Category</th><th>Chinese keywords</th><th>English keywords</th><th>Site-limited searches</th>"
+        "<th>分类</th><th>中文关键词</th><th>英文关键词</th><th>限定站点搜索</th>"
         "</tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table></div>"
@@ -145,7 +155,9 @@ def render_references(data: dict[str, Any]) -> str:
     for item in as_list(data.get("references")):
         if not isinstance(item, dict):
             continue
-        title = esc(item.get("title", "Untitled reference"))
+        raw_title = str(item.get("title") or "").strip()
+        display_title = str(item.get("title_zh") or raw_title or "未命名参考").strip()
+        title = esc(display_title)
         url = esc(item.get("url", ""))
         image = esc(item.get("image", ""))
         source = esc(item.get("source", "Reference"))
@@ -153,21 +165,40 @@ def render_references(data: dict[str, Any]) -> str:
             f'<a class="thumb" href="{url or image}" target="_blank" rel="noreferrer">'
             f'<img src="{image}" alt="{title}" loading="lazy"></a>'
             if image
-            else '<div class="thumb placeholder">No image link</div>'
+            else '<div class="thumb placeholder">无可用图片</div>'
         )
         link_html = f'<a href="{url}" target="_blank" rel="noreferrer">{title}</a>' if url else title
+        chips = []
+        for key, label in [
+            ("source_quality", "来源"),
+            ("quality_tier", "分级"),
+            ("copyright_risk", "版权风险"),
+        ]:
+            value = item.get(key)
+            if value:
+                chips.append(f'<span class="chip">{esc(label)}：{esc(reference_label(key, value))}</span>')
+        borrowable = comma_list(item.get("borrowable_parts"))
+        chip_html = f'<div class="chips">{"".join(chips)}</div>' if chips else ""
+        original_title = (
+            f'<p class="original-title">原始标题：{esc(raw_title)}</p>'
+            if raw_title and raw_title != display_title
+            else ""
+        )
         cards.append(
             '<article class="reference-card">'
             f"{image_html}"
             '<div class="reference-body">'
             f"<p class=\"source\">{source} · {esc(item.get('category', 'General'))}</p>"
             f"<h3>{link_html}</h3>"
-            f"<p><b>Borrow:</b> {esc(item.get('borrow', 'Not specified'))}</p>"
-            f"<p><b>Avoid:</b> {esc(item.get('avoid', 'Not specified'))}</p>"
+            f"{original_title}"
+            f"{chip_html}"
+            f"<p><b>可借鉴：</b>{borrowable}</p>"
+            f"<p><b>怎么借：</b>{esc(item.get('borrow', '未填写'))}</p>"
+            f"<p><b>别照抄：</b>{esc(item.get('avoid', '未填写'))}</p>"
             "</div></article>"
         )
     if not cards:
-        return '<p class="muted">No references provided.</p>'
+        return '<p class="muted">暂无参考。</p>'
     return '<div class="reference-grid">' + "".join(cards) + "</div>"
 
 
@@ -178,13 +209,13 @@ def render_deconstruction(data: dict[str, Any]) -> str:
 
     order = ["composition", "type", "color", "motifs", "texture", "mood", "application"]
     labels = {
-        "composition": "Composition",
-        "type": "Type",
-        "color": "Color",
-        "motifs": "Motifs",
-        "texture": "Texture",
-        "mood": "Mood",
-        "application": "Application",
+        "composition": "构图",
+        "type": "字体 / 字形",
+        "color": "配色",
+        "motifs": "符号",
+        "texture": "质感",
+        "mood": "气质",
+        "application": "应用",
     }
     keys = order + [key for key in deconstruction.keys() if key not in order]
     blocks = []
@@ -197,7 +228,7 @@ def render_deconstruction(data: dict[str, Any]) -> str:
             f"{text_list(deconstruction.get(key))}"
             "</div>"
         )
-    return '<div class="analysis-grid">' + "".join(blocks) + "</div>" if blocks else '<p class="muted">No deconstruction provided.</p>'
+    return '<div class="analysis-grid">' + "".join(blocks) + "</div>" if blocks else '<p class="muted">暂无审美拆解。</p>'
 
 
 def render_directions(data: dict[str, Any]) -> str:
@@ -209,17 +240,17 @@ def render_directions(data: dict[str, Any]) -> str:
             '<article class="direction-card">'
             f'<span class="count">{index:02d}</span>'
             f"<h3>{esc(item.get('name', f'Direction {index}'))}</h3>"
-            f"<p class=\"use\"><b>Best use:</b> {esc(item.get('best_use_case', 'Not specified'))}</p>"
-            f"<p><b>Visual keywords:</b> {comma_list(item.get('visual_keywords'))}</p>"
-            f"<p><b>Reference basis:</b> {esc(item.get('reference_basis', 'Not specified'))}</p>"
-            f"<p><b>Composition:</b> {esc(item.get('composition_advice', 'Not specified'))}</p>"
-            f"<p><b>Type:</b> {esc(item.get('type_advice', 'Not specified'))}</p>"
-            f"<p><b>Color:</b> {esc(item.get('color_advice', 'Not specified'))}</p>"
-            f"<p><b>Graphic / texture:</b> {esc(item.get('graphic_texture_advice', 'Not specified'))}</p>"
-            f"<div><b>Execution steps:</b>{text_list(item.get('execution_steps'))}</div>"
+            f"<p class=\"use\"><b>适合场景：</b>{esc(item.get('best_use_case', '未指定'))}</p>"
+            f"<p><b>视觉关键词：</b>{comma_list(item.get('visual_keywords'))}</p>"
+            f"<p><b>参考依据：</b>{esc(item.get('reference_basis', '未指定'))}</p>"
+            f"<p><b>构图建议：</b>{esc(item.get('composition_advice', '未指定'))}</p>"
+            f"<p><b>字体 / 字形建议：</b>{esc(item.get('type_advice', '未指定'))}</p>"
+            f"<p><b>配色建议：</b>{esc(item.get('color_advice', '未指定'))}</p>"
+            f"<p><b>图形 / 质感建议：</b>{esc(item.get('graphic_texture_advice', '未指定'))}</p>"
+            f"<div><b>今天怎么做：</b>{text_list(item.get('execution_steps'))}</div>"
             "</article>"
         )
-    return '<div class="direction-list">' + "".join(cards) + "</div>" if cards else '<p class="muted">No directions provided.</p>'
+    return '<div class="direction-list">' + "".join(cards) + "</div>" if cards else '<p class="muted">暂无设计方向。</p>'
 
 
 def render_prompts(data: dict[str, Any]) -> str:
@@ -234,19 +265,19 @@ def render_prompts(data: dict[str, Any]) -> str:
             f"<h3>{esc(item.get('direction', 'Prompt'))}</h3>"
             f"<p class=\"source\">{esc(item.get('artifact_type', ''))}</p>"
             f"<pre>{prompt}</pre>"
-            f"{f'<p><b>Negative:</b> {negative}</p>' if negative else ''}"
+            f"{f'<p><b>负面提示：</b>{negative}</p>' if negative else ''}"
             "</article>"
         )
-    return '<div class="prompt-list">' + "".join(cards) + "</div>" if cards else '<p class="muted">No prompts provided.</p>'
+    return '<div class="prompt-list">' + "".join(cards) + "</div>" if cards else '<p class="muted">暂无提示词。</p>'
 
 
 def render_notes(data: dict[str, Any]) -> str:
     parts = []
     if data.get("copyright_notes"):
-        parts.append("<h3>Copyright and usage notes</h3>" + text_list(data.get("copyright_notes")))
+        parts.append("<h3>版权与使用提醒</h3>" + text_list(data.get("copyright_notes")))
     if data.get("next_prompt"):
-        parts.append(f"<h3>Next prompt</h3><pre>{esc(data.get('next_prompt'))}</pre>")
-    return "".join(parts) if parts else '<p class="muted">No notes provided.</p>'
+        parts.append(f"<h3>下一步提示词</h3><pre>{esc(data.get('next_prompt'))}</pre>")
+    return "".join(parts) if parts else '<p class="muted">暂无备注。</p>'
 
 
 def build_html(data: dict[str, Any]) -> str:
@@ -256,13 +287,13 @@ def build_html(data: dict[str, Any]) -> str:
 
     body = "\n".join(
         [
-            section("Brief", render_brief(data)),
-            section("Search Keywords", render_keywords(data)),
-            section("Visual References", render_references(data)),
-            section("Aesthetic Deconstruction", render_deconstruction(data)),
-            section("Actionable Directions", render_directions(data)),
-            section("AI Image Prompts", render_prompts(data)),
-            section("Notes", render_notes(data)),
+            section("需求简析", render_brief(data)),
+            section("搜索关键词", render_keywords(data)),
+            section("视觉参考", render_references(data)),
+            section("审美拆解", render_deconstruction(data)),
+            section("可执行设计方向", render_directions(data)),
+            section("AI 生图提示词", render_prompts(data)),
+            section("备注", render_notes(data)),
         ]
     )
 
@@ -326,6 +357,9 @@ def build_html(data: dict[str, Any]) -> str:
     .thumb img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
     .thumb.placeholder {{ display: grid; place-items: center; color: var(--muted); font-weight: 800; }}
     .reference-body, .analysis-block, .direction-card, .prompt-card {{ padding: 16px; }}
+    .original-title {{ margin: -2px 0 8px; color: var(--muted); font-size: .82rem; }}
+    .chips {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }}
+    .chip {{ display: inline-flex; align-items: center; border: 1px solid var(--line); background: #f9f5ee; padding: 3px 8px; font-size: .76rem; font-weight: 800; color: var(--muted); }}
     .direction-list, .prompt-list {{ display: grid; gap: 14px; }}
     .direction-card {{ position: relative; padding-left: 64px; }}
     .count {{ position: absolute; left: 16px; top: 16px; color: var(--accent); font-weight: 950; }}

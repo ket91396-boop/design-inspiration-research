@@ -7,17 +7,46 @@ description: Turn a design brief into a sourced inspiration research pack for de
 
 Use this skill as a design research assistant and visual design director. Convert one fuzzy design need into a compact, actionable research pack: brief analysis, category-specific search keywords, live visual references with links, aesthetic analysis, 3-5 directions, and AI image prompts matched to the requested artifact type. Default output is the normal chat research pack. When the user explicitly asks for HTML, a report file, or a shareable deliverable, generate the structured JSON file plus a single-file HTML report with `scripts/build_report.py` and keep the chat response to a concise file handoff.
 
+## Core Model
+
+Keep the skill split into three layers:
+
+1. **Facts layer**: collect the brief, search plan, candidate references, source URLs, image availability, and source metadata. This layer should be evidence-like and concise.
+2. **Judgment layer**: classify references by design usefulness, source quality, borrowable parts, and copyright risk. This is where the agent acts as design director.
+3. **Delivery layer**: produce the chat pack or, when requested, audited JSON plus an HTML report.
+
+Do not let image extraction convenience drive the research. A high-quality Behance / Dribbble / Fonts In Use / Mobbin / Unsplash / Pexels page with no extractable image is still better than a low-quality template-market thumbnail.
+
+## Language Rule
+
+Match the user's language for all human-facing analysis and report text. If the user writes in Chinese, the HTML report must be Chinese-first:
+
+- Section titles, field labels, reference explanations, directions, deconstruction, copyright notes, and next-step prompts should be Chinese.
+- Keep original source titles and source names for traceability, but make Chinese the primary reading layer. Add `title_zh` for each reference; render/show it as the main card title, with the original `title` as secondary source text when different.
+- `borrow`, `avoid`, and `borrowable_parts` must be written in Chinese for Chinese requests.
+- Do not leave renderer labels such as "Visual References", "Borrow", "Avoid", "Source", "Tier", or "Risk" in English for Chinese report output.
+
+## Bundled References
+
+Load only the reference file needed for the task:
+
+- `references/artifact-patterns.md`: read when deciding how to analyze logos, posters, typography, packaging, UI, textures, wallpapers, or illustration.
+- `references/source-and-image-strategy.md`: read before live research or HTML report generation; contains source routing, image extraction policy, and site-specific expectations.
+- `references/quality-rubric.md`: read when selecting final references or assigning `quality_tier`, `source_quality`, and `copyright_risk`.
+
 ## Core Workflow
 
 Always follow this sequence unless the user explicitly asks for a narrower output:
 
 1. Analyze the design need.
-2. List search keywords for every standard category.
-3. Search every standard category immediately and link images or image/project pages.
-4. Deconstruct the references aesthetically.
-5. Summarize 3-5 directions the designer can start today.
-6. Write AI image prompts matched to the artifact type.
-7. If the user explicitly asks for HTML, a report file, or a shareable deliverable, build a JSON research file and render it to HTML with `scripts/build_report.py`; in chat, link the generated report instead of repeating the full research pack.
+2. Build a short research plan: artifact priorities, category priorities, route-to-site choices, and target reference counts.
+3. List search keywords for every standard category.
+4. Search every standard category immediately and collect a candidate pool with page links.
+5. Select final references from the candidate pool using source quality, design relevance, borrowability, and copyright risk.
+6. Deconstruct the selected references aesthetically.
+7. Summarize 3-5 directions the designer can start today.
+8. Write AI image prompts matched to the artifact type.
+9. If the user explicitly asks for HTML, a report file, or a shareable deliverable, build a JSON research file, prepare/audit images, audit research quality, and render it to HTML with `scripts/build_report.py`; in chat, link the generated report instead of repeating the full research pack.
 
 If the user says not to browse, skip step 3 and make that limitation explicit.
 
@@ -99,10 +128,24 @@ For each reference include:
 - Linked title.
 - Image direct link when stable and available; otherwise the project/image page link.
 - Source site.
+- Quality tier: `green`, `yellow`, or `red`.
+- Source quality: `primary`, `secondary`, or `supplement`.
+- Copyright risk: `low`, `medium`, or `high`.
+- Borrowable parts: composition, typography, color, motif, material, UI pattern, photographic treatment, etc.
 - What to borrow: composition, typography, color, motif, material, UI pattern, etc.
 - What not to copy: exact artwork, trademark-like mark, proprietary layout, licensed photo, cliche element.
 
 If a site does not expose stable direct image links, page links are acceptable. Explain why the page is still useful.
+
+### Reference Quality Tiers
+
+Use quality tiers as a design decision list, not a moral judgment on the source:
+
+- 🟢 `green`: safe to borrow abstract design logic such as composition, color relationships, material treatment, spacing, hierarchy, or interaction pattern.
+- 🟡 `yellow`: useful but needs transformation. Examples: strong art direction, recognizable commercial campaign, distinctive custom lettering, branded photography, or a reference whose source is relevant but image extraction is weak.
+- 🔴 `red`: anti-pattern or high-risk reference. Examples: template-market work, obvious IP, trademark-like logos, copied mascot styles, generic stock layouts, or overused festival tropes. Include only when it helps explain what to avoid.
+
+Primary and secondary final references should mostly be green/yellow. Red references should be rare and framed as warnings.
 
 ## Step 4: Aesthetic Deconstruction
 
@@ -183,7 +226,13 @@ python3 scripts/prepare_report_images.py /path/to/research.raw.json /path/to/res
 python3 scripts/audit_report_images.py /path/to/research.json --min-ratio 0 --fail-on-duplicates
 ```
 
-5. Render the HTML only after the image audit passes:
+5. Audit research quality before rendering:
+
+```bash
+python3 scripts/audit_research_quality.py /path/to/research.json
+```
+
+6. Render the HTML only after audits pass:
 
 ```bash
 python3 scripts/build_report.py /path/to/research.json /path/to/design-inspiration-report.html
@@ -200,7 +249,7 @@ Keep the JSON concise but structured:
 - `brief`: object with `artifact_type`, `use_context`, `audience_tone`, `core_symbols`, and `visual_risks`.
 - `assumptions`: optional list of assumptions.
 - `keywords`: list of objects with `category`, `priority`, `zh`, `en`, and `site`.
-- `references`: list of objects with `category`, `title`, `url`, `image`, `source`, `borrow`, and `avoid`.
+- `references`: list of objects with `category`, `title`, optional `title_zh`, `url`, `image`, `source`, `source_quality`, `quality_tier`, `copyright_risk`, `borrowable_parts`, `borrow`, and `avoid`. For Chinese reports, `title_zh`, `borrowable_parts`, `borrow`, and `avoid` should be Chinese-first while `title` preserves the original source title.
 - `deconstruction`: object with `composition`, `type`, `color`, `motifs`, `texture`, `mood`, and `application`.
 - `directions`: list of objects with `name`, `best_use_case`, `visual_keywords`, `reference_basis`, `composition_advice`, `type_advice`, `color_advice`, `graphic_texture_advice`, and `execution_steps`.
 - `prompts`: list of objects with `direction`, `artifact_type`, `prompt`, and `negative_prompt`.
@@ -212,10 +261,20 @@ For HTML reports, image quality is part of the deliverable, but source relevance
 - Prefer references whose own page exposes a usable thumbnail or stable direct image URL.
 - `image` must be from the same reference page, from metadata on that page, or a local file downloaded from that page by `prepare_report_images.py`.
 - If a preferred high-quality reference does not expose a usable image, leave `image` empty and keep the reference if its design value is strong.
-- Do not screenshot pages for missing images.
+- Do not screenshot pages for missing images by default. Screenshots are slow and often turn a reference card into a page-capture artifact instead of a useful visual reference.
 - Do not use unrelated websites, generic search-result thumbnails, or random replacement images to fill missing cards.
 - Do not reuse the same image across multiple references unless the duplicate is intentional and explained.
 - If `audit_report_images.py --fail-on-duplicates` fails, fix the duplicate image assignments before rendering HTML.
+
+### Image Extraction Reality Check
+
+Behance, Dribbble, Unsplash, and Pexels often change markup, lazy-load images, proxy assets, or block simple static fetching. The default policy is:
+
+1. Keep the high-quality reference page URL.
+2. Try same-page `og:image`, `twitter:image`, `<img>`, and direct image candidates via `prepare_report_images.py`.
+3. If no same-page usable image is found, leave `image` empty.
+4. Do not replace it with a search-result thumbnail or unrelated image.
+5. Do not screenshot unless the user explicitly asks for screenshot-backed cards and accepts slower generation.
 
 ## Default Output Structure
 
