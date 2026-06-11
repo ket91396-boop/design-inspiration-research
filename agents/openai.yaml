@@ -1,4 +1,4 @@
 interface:
   display_name: "Design Inspiration Research"
-  short_description: "Turn design briefs into sourced visual directions"
-  default_prompt: "Use $design-inspiration-research to turn my design brief into sourced references, visual analysis, directions, and AI image prompts."
+  short_description: "Turn design briefs into sourced visual directions, with HTML reports when requested"
+  default_prompt: "Use $design-inspiration-research to turn my design brief into sourced references, visual analysis, directions, and AI image prompts. If I ask for HTML, generate an HTML report from high-quality reference sites and keep the chat reply concise."

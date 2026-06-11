@@ -1,11 +1,11 @@
 ---
 name: design-inspiration-research
-description: Turn a design brief into a sourced inspiration research pack for designers. Use when the user asks for inspiration, references, moodboards, keywords, visual directions, poster/logo/cover/typography/packaging/UI reference research, or AI image prompts for a design task such as a festival poster, brand logo, title lettering, wallpaper, texture, landing page, app UI, or campaign key visual.
+description: Turn a design brief into a sourced inspiration research pack for designers, with an optional single-file HTML report only when requested. Use when the user asks for inspiration, references, moodboards, keywords, visual directions, poster/logo/cover/typography/packaging/UI reference research, HTML research reports, or AI image prompts for a design task such as a festival poster, brand logo, title lettering, wallpaper, texture, landing page, app UI, or campaign key visual.
 ---
 
 # Design Inspiration Research
 
-Use this skill as a design research assistant and visual design director. Convert one fuzzy design need into a compact, actionable research pack: brief analysis, category-specific search keywords, live visual references with links, aesthetic analysis, 3-5 directions, and AI image prompts matched to the requested artifact type.
+Use this skill as a design research assistant and visual design director. Convert one fuzzy design need into a compact, actionable research pack: brief analysis, category-specific search keywords, live visual references with links, aesthetic analysis, 3-5 directions, and AI image prompts matched to the requested artifact type. Default output is the normal chat research pack. When the user explicitly asks for HTML, a report file, or a shareable deliverable, generate the structured JSON file plus a single-file HTML report with `scripts/build_report.py` and keep the chat response to a concise file handoff.
 
 ## Core Workflow
 
@@ -17,6 +17,7 @@ Always follow this sequence unless the user explicitly asks for a narrower outpu
 4. Deconstruct the references aesthetically.
 5. Summarize 3-5 directions the designer can start today.
 6. Write AI image prompts matched to the artifact type.
+7. If the user explicitly asks for HTML, a report file, or a shareable deliverable, build a JSON research file and render it to HTML with `scripts/build_report.py`; in chat, link the generated report instead of repeating the full research pack.
 
 If the user says not to browse, skip step 3 and make that limitation explicit.
 
@@ -58,6 +59,15 @@ Do not search every site evenly. Route by reference type:
 | Color / palette inspiration | Pinterest, Behance, Dribbble, Coolors, Adobe Color | palettes, seasonal color systems, contrast, gradients, accent ratios |
 | Web / product UI | Mobbin, Land-book, Awwwards | SaaS pages, mobile UI, landing pages, product interaction visuals |
 
+### Source Quality Rule
+
+The site routing table is a quality constraint, not a loose suggestion. For primary and secondary references, search the preferred design/reference sites first and keep them as the main evidence even when their images are harder to extract.
+
+- Do not use template/material marketplaces such as Nipic / 昵图网, Tusij / 图司机, Qianku / 千库, 588ku / 千图, Pngtree, Canva templates, or BrandCrowd as main references just because their thumbnails are easy to download.
+- These template/material sites may be used only as low-priority supplements, anti-pattern examples, or when the user explicitly asks for Chinese template-market references.
+- If Behance, Dribbble, Pinterest, Awwwards, Land-book, Mobbin, Fonts In Use, Typewolf, Unsplash, or Pexels do not expose stable image URLs via static HTML, leave that reference's `image` empty. Do not screenshot it and do not replace it with an unrelated easier-to-scrape source.
+- In HTML reports, source quality outranks image-extraction convenience. A report that passes image audit but is mostly template-market references is not acceptable.
+
 ### Keyword Categories
 
 Use all of these category labels every time:
@@ -78,8 +88,8 @@ Browse immediately for every standard category. Prefer primary visual sources an
 
 Use these reference-count targets:
 
-- `primary`: find 4-5 strong references.
-- `secondary`: find 1-2 useful references.
+- `primary`: find 5-6 strong references.
+- `secondary`: find 2-3 useful references.
 - `wildcard`: find at least 1 useful reference.
 
 When the user explicitly names an artifact type, that matching category must be `primary`. For example, if the user asks for a poster, `Poster / 海报` should receive deeper coverage than the other categories.
@@ -155,6 +165,58 @@ Prompt for non-layout assets:
 
 Always include a negative prompt to remove gibberish text, low quality, watermarks, wrong artifact type, cheap templates, and copyrighted characters.
 
+## Optional Step 7: HTML Report
+
+Create an HTML report only when the user explicitly asks for HTML, a report file, polished deliverable, shareable file, or visual research pack as a file. In that case, the HTML report is the primary deliverable: the chat reply should briefly summarize and link the generated HTML/JSON instead of duplicating the full report content.
+
+1. Complete Steps 1-6 first.
+2. Save the research pack as a raw JSON file using the fields below.
+3. Prepare local report images from each reference's own page:
+
+```bash
+python3 scripts/prepare_report_images.py /path/to/research.raw.json /path/to/research.json --assets-dir /path/to/report-assets
+```
+
+4. Audit the prepared JSON before rendering:
+
+```bash
+python3 scripts/audit_report_images.py /path/to/research.json --min-ratio 0 --fail-on-duplicates
+```
+
+5. Render the HTML only after the image audit passes:
+
+```bash
+python3 scripts/build_report.py /path/to/research.json /path/to/design-inspiration-report.html
+```
+
+Use the current skill directory as the working directory, or call scripts by absolute path. The scripts use only Python standard library modules.
+
+### JSON Fields For The Renderer
+
+Keep the JSON concise but structured:
+
+- `title`: report title.
+- `subtitle`: one-line report context.
+- `brief`: object with `artifact_type`, `use_context`, `audience_tone`, `core_symbols`, and `visual_risks`.
+- `assumptions`: optional list of assumptions.
+- `keywords`: list of objects with `category`, `priority`, `zh`, `en`, and `site`.
+- `references`: list of objects with `category`, `title`, `url`, `image`, `source`, `borrow`, and `avoid`.
+- `deconstruction`: object with `composition`, `type`, `color`, `motifs`, `texture`, `mood`, and `application`.
+- `directions`: list of objects with `name`, `best_use_case`, `visual_keywords`, `reference_basis`, `composition_advice`, `type_advice`, `color_advice`, `graphic_texture_advice`, and `execution_steps`.
+- `prompts`: list of objects with `direction`, `artifact_type`, `prompt`, and `negative_prompt`.
+- `copyright_notes`: list of usage and copyright cautions.
+- `next_prompt`: optional next-step prompt for continuing the design work.
+
+For HTML reports, image quality is part of the deliverable, but source relevance comes first:
+
+- Prefer references whose own page exposes a usable thumbnail or stable direct image URL.
+- `image` must be from the same reference page, from metadata on that page, or a local file downloaded from that page by `prepare_report_images.py`.
+- If a preferred high-quality reference does not expose a usable image, leave `image` empty and keep the reference if its design value is strong.
+- Do not screenshot pages for missing images.
+- Do not use unrelated websites, generic search-result thumbnails, or random replacement images to fill missing cards.
+- Do not reuse the same image across multiple references unless the duplicate is intentional and explained.
+- If `audit_report_images.py --fail-on-duplicates` fails, fix the duplicate image assignments before rendering HTML.
+
 ## Default Output Structure
 
 Use this structure by default:
@@ -176,5 +238,7 @@ Use this structure by default:
 
 ## 下一步提示词
 ```
+
+For file deliverables, create the JSON and HTML in the user's requested output folder. If no folder is specified, use the current workspace's `outputs/` directory when available.
 
 Keep the result useful rather than exhaustive. The goal is to reduce the designer's browser-tab chaos and help them begin work immediately.
