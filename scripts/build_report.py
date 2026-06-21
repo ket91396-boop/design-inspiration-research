@@ -95,6 +95,28 @@ def reference_label(key: str, value: Any) -> str:
     return labels.get(key, {}).get(text.lower(), text)
 
 
+def render_missing_image(url: str, status: str, error: str) -> str:
+    status_text = {
+        "missing": "未提取到图片",
+        "local": "本地图片不可用",
+        "downloaded": "图片不可用",
+        "screenshot": "截图不可用",
+    }.get(status, "未提取到图片")
+    detail = f"<small>{esc(error)}</small>" if error else "<small>保留高质量来源链接，不使用无关缩略图替代。</small>"
+    action = (
+        f'<a class="source-button" href="{url}" target="_blank" rel="noreferrer">打开原始页面</a>'
+        if url
+        else '<span class="source-button muted">无来源链接</span>'
+    )
+    return (
+        '<div class="thumb placeholder">'
+        f"<span>{esc(status_text)}</span>"
+        f"{detail}"
+        f"{action}"
+        "</div>"
+    )
+
+
 def section(title: str, body: str, extra_class: str = "") -> str:
     class_attr = f' class="section {extra_class}"' if extra_class else ' class="section"'
     return f"<section{class_attr}><h2>{esc(title)}</h2>{body}</section>"
@@ -160,13 +182,21 @@ def render_references(data: dict[str, Any]) -> str:
         title = esc(display_title)
         url = esc(item.get("url", ""))
         image = esc(item.get("image", ""))
+        preview = esc(item.get("_preview_image", ""))
         source = esc(item.get("source", "Reference"))
-        image_html = (
-            f'<a class="thumb" href="{url or image}" target="_blank" rel="noreferrer">'
-            f'<img src="{image}" alt="{title}" loading="lazy"></a>'
-            if image
-            else '<div class="thumb placeholder">无可用图片</div>'
-        )
+        if image:
+            image_html = (
+                f'<a class="thumb" href="{url or image}" target="_blank" rel="noreferrer">'
+                f'<img src="{image}" alt="{title}" loading="lazy"></a>'
+            )
+        elif preview:
+            image_html = (
+                f'<a class="thumb remote-preview" href="{url or preview}" target="_blank" rel="noreferrer">'
+                f'<img src="{preview}" alt="{title}" loading="lazy">'
+                '<span>远程预览</span></a>'
+            )
+        else:
+            image_html = render_missing_image(url, str(item.get("_image_status") or ""), str(item.get("_image_error") or ""))
         link_html = f'<a href="{url}" target="_blank" rel="noreferrer">{title}</a>' if url else title
         chips = []
         for key, label in [
@@ -355,7 +385,11 @@ def build_html(data: dict[str, Any]) -> str:
     .reference-card {{ display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 190px; overflow: hidden; }}
     .thumb {{ display: block; width: 100%; height: 100%; min-height: 190px; background: #eee5d8; }}
     .thumb img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
-    .thumb.placeholder {{ display: grid; place-items: center; color: var(--muted); font-weight: 800; }}
+    .remote-preview {{ position: relative; }}
+    .remote-preview span {{ position: absolute; left: 8px; bottom: 8px; padding: 4px 7px; background: rgba(21,21,21,.72); color: #fff; font-size: .72rem; font-weight: 850; }}
+    .thumb.placeholder {{ display: grid; align-content: center; justify-items: center; gap: 8px; padding: 16px; text-align: center; color: var(--muted); font-weight: 800; }}
+    .thumb.placeholder small {{ display: block; max-width: 150px; font-weight: 600; line-height: 1.35; text-transform: none; letter-spacing: 0; }}
+    .source-button {{ display: inline-flex; align-items: center; justify-content: center; min-height: 30px; padding: 0 10px; border: 1px solid var(--line); background: var(--panel); color: var(--accent-3); font-size: .78rem; font-weight: 850; text-decoration: none; }}
     .reference-body, .analysis-block, .direction-card, .prompt-card {{ padding: 16px; }}
     .original-title {{ margin: -2px 0 8px; color: var(--muted); font-size: .82rem; }}
     .chips {{ display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }}

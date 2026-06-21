@@ -34,7 +34,9 @@ from typing import Any
 
 USER_AGENT = "Mozilla/5.0 (Codex design-inspiration-research image preparer)"
 MAX_BYTES = 8 * 1024 * 1024
-TIMEOUT = 20
+DEFAULT_TIMEOUT = 8
+DEFAULT_MAX_CANDIDATES = 4
+DEFAULT_SCREENSHOT_TIMEOUT = 18
 IMAGE_EXTENSIONS = {
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
@@ -44,10 +46,10 @@ IMAGE_EXTENSIONS = {
 }
 
 
-def fetch_bytes(url: str, max_bytes: int = MAX_BYTES) -> tuple[bytes, str, str]:
+def fetch_bytes(url: str, max_bytes: int = MAX_BYTES, timeout: int = DEFAULT_TIMEOUT) -> tuple[bytes, str, str]:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     context = ssl._create_unverified_context()
-    with urllib.request.urlopen(req, timeout=TIMEOUT, context=context) as response:
+    with urllib.request.urlopen(req, timeout=timeout, context=context) as response:
         final_url = response.geturl()
         content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
         chunks: list[bytes] = []
@@ -63,8 +65,8 @@ def fetch_bytes(url: str, max_bytes: int = MAX_BYTES) -> tuple[bytes, str, str]:
         return b"".join(chunks), content_type, final_url
 
 
-def fetch_text(url: str) -> str:
-    data, _content_type, _final_url = fetch_bytes(url, max_bytes=3 * 1024 * 1024)
+def fetch_text(url: str, timeout: int = DEFAULT_TIMEOUT) -> str:
+    data, _content_type, _final_url = fetch_bytes(url, max_bytes=3 * 1024 * 1024, timeout=timeout)
     return data.decode("utf-8", errors="ignore")
 
 
@@ -163,18 +165,19 @@ def make_relative(target: Path, base_dir: Path) -> str:
         return target.resolve().as_posix()
 
 
-def screenshot_page(page_url: str, target: Path) -> tuple[bool, str]:
+def screenshot_page(page_url: str, target: Path, timeout: int = DEFAULT_SCREENSHOT_TIMEOUT) -> tuple[bool, str]:
     script = r"""
 const { chromium } = require('playwright');
 const fs = require('fs');
 
 (async () => {
-  const [url, out] = process.argv.slice(2);
+  const [url, out, timeoutMsValue] = process.argv.slice(2);
+  const timeoutMs = Number(timeoutMsValue || 18000);
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1365, height: 1000 }, deviceScaleFactor: 1 });
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await page.waitForTimeout(2500);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    await page.waitForTimeout(1200);
     await page.screenshot({ path: out, fullPage: false });
     const stat = fs.statSync(out);
     if (!stat.size) throw new Error('empty screenshot');
@@ -189,10 +192,10 @@ const fs = require('fs');
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
-            ["node", "-e", script, page_url, str(target)],
+            ["node", "-e", script, page_url, str(target), str(timeout * 1000)],
             capture_output=True,
             text=True,
-            timeout=45,
+            timeout=timeout + 8,
         )
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)
@@ -211,6 +214,10 @@ def prepare_images(
     strict: bool,
     trust_provided: bool,
     screenshot_missing: bool,
+    timeout: int,
+    max_candidates: int,
+    image_mode: str,
+    screenshot_timeout: int,
 ) -> int:
     data = json.loads(input_path.read_text(encoding="utf-8"))
     references = data.get("references")
@@ -234,6 +241,41 @@ def prepare_images(
         provided_image = str(ref.get("image") or "").strip()
         ref["_image_status"] = "missing"
 
+        if image_mode == "screenshot":
+            if page_url:
+                target = assets_dir / f"{index:02d}-{slugify(title, f'reference-{index}')}-page.png"
+                ok, screenshot_message = screenshot_page(page_url, target, timeout=screenshot_timeout)
+                if ok:
+                    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                    if digest in seen_hashes:
+                        message = f"{title}: screenshot duplicates image used by {seen_hashes[digest]}"
+                        if strict:
+                            errors.append(message)
+                        else:
+                            warnings.append(message)
+                        ref["image"] = ""
+                        ref["_image_error"] = "duplicate screenshot"
+                    else:
+                        ref["image"] = make_relative(target, report_dir)
+                        ref["_image_status"] = "screenshot"
+                        ref["_image_source"] = page_url
+                        seen_hashes[digest] = title
+                    continue
+                ref["_image_error"] = screenshot_message
+                message = f"{title}: screenshot fallback failed ({screenshot_message})"
+                if strict:
+                    errors.append(message)
+                else:
+                    warnings.append(message)
+            else:
+                ref["_image_error"] = "no reference page URL for screenshot"
+                message = f"{title}: no reference page URL for screenshot"
+                if strict:
+                    errors.append(message)
+                else:
+                    warnings.append(message)
+            continue
+
         if provided_image and not is_remote_url(provided_image):
             local_path = (input_path.parent / provided_image).resolve()
             ok, message, digest = local_image_ok(local_path)
@@ -251,7 +293,7 @@ def prepare_images(
         candidates: list[str] = []
         if page_url:
             try:
-                page_html = fetch_text(page_url)
+                page_html = fetch_text(page_url, timeout=timeout)
                 candidates = extract_image_candidates(page_url, page_html)
             except Exception as exc:  # noqa: BLE001
                 warnings.append(f"{title}: could not fetch reference page ({exc})")
@@ -264,12 +306,15 @@ def prepare_images(
             else:
                 warnings.append(f"{title}: provided image was not found on its reference page; ignoring it")
         ordered_candidates.extend([c for c in candidates if c not in ordered_candidates])
+        ordered_candidates = ordered_candidates[:max_candidates]
+        if ordered_candidates:
+            ref["_preview_image"] = ordered_candidates[0]
 
         downloaded = False
         last_error = "no image candidates"
         for candidate in ordered_candidates:
             try:
-                image_bytes, content_type, final_url = fetch_bytes(candidate)
+                image_bytes, content_type, final_url = fetch_bytes(candidate, timeout=timeout)
                 if not looks_like_image(image_bytes[:64], content_type):
                     last_error = f"{candidate} returned non-image content type {content_type or 'unknown'}"
                     continue
@@ -293,9 +338,10 @@ def prepare_images(
                 last_error = f"{candidate} failed: {exc}"
 
         if not downloaded:
-            if screenshot_missing and page_url:
+            ref["_image_error"] = last_error
+            if (screenshot_missing or image_mode == "hybrid") and page_url:
                 target = assets_dir / f"{index:02d}-{slugify(title, f'reference-{index}')}-page.png"
-                ok, screenshot_message = screenshot_page(page_url, target)
+                ok, screenshot_message = screenshot_page(page_url, target, timeout=screenshot_timeout)
                 if ok:
                     digest = hashlib.sha256(target.read_bytes()).hexdigest()
                     if digest in seen_hashes:
@@ -355,7 +401,31 @@ def main() -> int:
     parser.add_argument(
         "--screenshot-missing",
         action="store_true",
-        help="Deprecated: capture missing images with Playwright. Current skill rules prefer leaving missing images empty.",
+        help="Capture missing images with Playwright page screenshots.",
+    )
+    parser.add_argument(
+        "--image-mode",
+        choices=["extract", "hybrid", "screenshot"],
+        default="extract",
+        help="extract=download page images; hybrid=extract then screenshot missing; screenshot=capture page screenshots for all references.",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
+        help="Per-page and per-image fetch timeout in seconds.",
+    )
+    parser.add_argument(
+        "--max-candidates",
+        type=int,
+        default=DEFAULT_MAX_CANDIDATES,
+        help="Maximum image candidates to try per reference page.",
+    )
+    parser.add_argument(
+        "--screenshot-timeout",
+        type=int,
+        default=DEFAULT_SCREENSHOT_TIMEOUT,
+        help="Per-page screenshot timeout in seconds when screenshot fallback is enabled.",
     )
     args = parser.parse_args()
 
@@ -367,6 +437,10 @@ def main() -> int:
         strict=args.strict,
         trust_provided=args.trust_provided,
         screenshot_missing=args.screenshot_missing,
+        timeout=args.timeout,
+        max_candidates=max(1, args.max_candidates),
+        image_mode=args.image_mode,
+        screenshot_timeout=max(3, args.screenshot_timeout),
     )
 
 
