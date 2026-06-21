@@ -7,6 +7,10 @@ description: Turn a design brief into a sourced inspiration research pack for de
 
 Use this skill as a design research assistant and visual design director. Convert one fuzzy design need into a compact, actionable research pack: brief analysis, category-specific search keywords, live visual references with links, aesthetic analysis, 3-5 directions, and AI image prompts matched to the requested artifact type. Default output is the normal chat research pack. When the user explicitly asks for HTML, a report file, or a shareable deliverable, generate the structured JSON file plus a single-file HTML report with `scripts/build_report.py` and keep the chat response to a concise file handoff.
 
+Use a lightweight mode when the user asks for quick inspiration, a first pass, or a few directions without a file deliverable. In lightweight mode, keep the same source-quality rules but reduce the deliverable to a brief, keyword matrix, 8-12 references, 3 directions, prompts, and copyright notes.
+
+Never run screenshot capture, image localization, JSON report preparation, or HTML rendering for ordinary chat research. These file/report steps are only for explicit requests such as "生成 HTML", "做成报告", "给我一个可分享文件", "输出文件", or "HTML 里要有图".
+
 ## Core Model
 
 Keep the skill split into three layers:
@@ -33,6 +37,8 @@ Load only the reference file needed for the task:
 - `references/artifact-patterns.md`: read when deciding how to analyze logos, posters, typography, packaging, UI, textures, wallpapers, or illustration.
 - `references/source-and-image-strategy.md`: read before live research or HTML report generation; contains source routing, image extraction policy, and site-specific expectations.
 - `references/quality-rubric.md`: read when selecting final references or assigning `quality_tier`, `source_quality`, and `copyright_risk`.
+- `scripts/generate_search_links.py`: run when browsing/image search is unavailable or the user wants manual search links.
+- `scripts/prepare_report_images.ps1` and `scripts/build_report.ps1`: prefer on Windows when `python` is unavailable or resolves to the Microsoft Store placeholder. They create visual-complete HTML reports using Chrome/Edge screenshots and a PowerShell HTML renderer.
 
 ## Core Workflow
 
@@ -46,9 +52,29 @@ Always follow this sequence unless the user explicitly asks for a narrower outpu
 6. Deconstruct the selected references aesthetically.
 7. Summarize 3-5 directions the designer can start today.
 8. Write AI image prompts matched to the artifact type.
-9. If the user explicitly asks for HTML, a report file, or a shareable deliverable, build a JSON research file, prepare/audit images, audit research quality, and render it to HTML with `scripts/build_report.py`; in chat, link the generated report instead of repeating the full research pack.
+9. If and only if the user explicitly asks for HTML, a report file, an output file, or a shareable deliverable, build a JSON research file, prepare/audit images, audit research quality, and render it to HTML with `scripts/build_report.py`; in chat, link the generated report instead of repeating the full research pack.
 
 If the user says not to browse, skip step 3 and make that limitation explicit.
+
+### Lightweight Mode
+
+Use lightweight mode when the user says "快速", "先简单找", "不要报告", "先给几个方向", "quick inspiration", or the brief is exploratory and no file deliverable is requested.
+
+- Keep the standard categories and source-quality rules.
+- Search fewer but better sources: aim for 8-12 total references.
+- Output compact reference cards with title, source link, source quality, quality tier, copyright risk, what to borrow, and what not to copy.
+- Do not generate JSON, HTML, screenshots, image localization, remote preview extraction, or image audits.
+- If the user later asks for HTML/report, convert the selected references into the structured JSON workflow.
+
+### No-Browsing Fallback
+
+If browsing or image search is unavailable, do not pretend to have found images. Generate a searchable link matrix instead:
+
+```bash
+python3 scripts/generate_search_links.py "brief text" --output design-inspiration-search-links.md
+```
+
+Then give the user the file/link matrix plus a short manual workflow: open the links, collect promising source URLs, and send them back for deconstruction.
 
 ## Step 1: Analyze The Need
 
@@ -212,15 +238,43 @@ Always include a negative prompt to remove gibberish text, low quality, watermar
 
 Create an HTML report only when the user explicitly asks for HTML, a report file, polished deliverable, shareable file, or visual research pack as a file. In that case, the HTML report is the primary deliverable: the chat reply should briefly summarize and link the generated HTML/JSON instead of duplicating the full report content.
 
-1. Complete Steps 1-6 first.
-2. Save the research pack as a raw JSON file using the fields below.
-3. Prepare local report images from each reference's own page:
+### Runtime Decision
 
-```bash
-python3 scripts/prepare_report_images.py /path/to/research.raw.json /path/to/research.json --assets-dir /path/to/report-assets
+Choose the fastest reliable path automatically. Do not ask the user to choose an implementation tool.
+
+1. For ordinary chat research: do not run scripts.
+2. Keep the Python scripts. They are good for token-free mechanical work when a real Python runtime is available, especially source-image extraction, audits, and deterministic report rendering.
+3. For HTML on Windows when `python` is missing or is the Microsoft Store placeholder: use the PowerShell screenshot path. It is the most convenient path for visual-complete reports:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\prepare_report_images.ps1 research.raw.json research.json -AssetsDir report-assets -ImageMode screenshot
+powershell -ExecutionPolicy Bypass -File scripts\build_report.ps1 research.json design-inspiration-report.html
 ```
 
-4. Audit the prepared JSON before rendering:
+4. For HTML when Python is available and source-image fidelity matters more than visual completeness: use the Python extraction path below.
+5. Avoid installing Playwright browsers during a user task. If Playwright's bundled Chromium is missing but Chrome/Edge exists, prefer Chrome/Edge screenshot fallback instead of asking the user to run `npx playwright install`.
+
+Default preference: use Python when it is already available and works; otherwise use the PowerShell fallback without mentioning the tool choice unless there is a failure. The user experience should be "I asked for HTML and got HTML", not "I had to choose Python vs PowerShell".
+
+1. Complete Steps 1-6 first.
+2. Save the research pack as a raw JSON file using the fields below.
+3. Prepare local report images from each reference's own page. Choose the image strategy before running the script:
+
+- Use `--image-mode extract` by default when source fidelity matters most. This tries same-page metadata/images and leaves missing images empty.
+- Use `--image-mode hybrid` when the user wants an HTML report with fewer empty cards. This tries source images first, keeps a remote preview candidate, then screenshots only missing cards.
+- Use `--image-mode screenshot` when the user cares more about fast visual preview coverage than original image extraction. This captures each reference page as a local screenshot thumbnail and is the closest practical way to make every reachable reference card visual.
+
+```bash
+python3 scripts/prepare_report_images.py /path/to/research.raw.json /path/to/research.json --assets-dir /path/to/report-assets --image-mode extract --timeout 8 --max-candidates 4
+```
+
+For visual-complete HTML reports:
+
+```bash
+python3 scripts/prepare_report_images.py /path/to/research.raw.json /path/to/research.json --assets-dir /path/to/report-assets --image-mode screenshot --screenshot-timeout 18
+```
+
+4. Audit the prepared JSON before rendering. Missing images are allowed because source quality outranks thumbnail availability:
 
 ```bash
 python3 scripts/audit_report_images.py /path/to/research.json --min-ratio 0 --fail-on-duplicates
@@ -260,21 +314,27 @@ For HTML reports, image quality is part of the deliverable, but source relevance
 
 - Prefer references whose own page exposes a usable thumbnail or stable direct image URL.
 - `image` must be from the same reference page, from metadata on that page, or a local file downloaded from that page by `prepare_report_images.py`.
+- If localizing a candidate fails, `prepare_report_images.py` may keep `_preview_image`; `build_report.py` can display it as a labeled remote preview. Treat it as a preview only, not a downloaded asset.
 - If a preferred high-quality reference does not expose a usable image, leave `image` empty and keep the reference if its design value is strong.
-- Do not screenshot pages for missing images by default. Screenshots are slow and often turn a reference card into a page-capture artifact instead of a useful visual reference.
+- Do not claim screenshot thumbnails are original images. Label them as page previews when discussing the report.
+- Use screenshots when the user explicitly values visual completeness in HTML, such as "HTML 里都要有图", "不要 no link", "快速预览", or "截图兜底".
 - Do not use unrelated websites, generic search-result thumbnails, or random replacement images to fill missing cards.
 - Do not reuse the same image across multiple references unless the duplicate is intentional and explained.
 - If `audit_report_images.py --fail-on-duplicates` fails, fix the duplicate image assignments before rendering HTML.
+- When `prepare_report_images.py` cannot localize an image, it writes `_image_status` and `_image_error`. Keep those fields. `build_report.py` will show a useful no-image card with an "open original page" link instead of a dead blank card.
 
 ### Image Extraction Reality Check
 
 Behance, Dribbble, Unsplash, and Pexels often change markup, lazy-load images, proxy assets, or block simple static fetching. The default policy is:
 
 1. Keep the high-quality reference page URL.
-2. Try same-page `og:image`, `twitter:image`, `<img>`, and direct image candidates via `prepare_report_images.py`.
-3. If no same-page usable image is found, leave `image` empty.
-4. Do not replace it with a search-result thumbnail or unrelated image.
-5. Do not screenshot unless the user explicitly asks for screenshot-backed cards and accepts slower generation.
+2. For source-fidelity reports, try same-page `og:image`, `twitter:image`, `<img>`, and direct image candidates via `prepare_report_images.py --image-mode extract`.
+3. If a candidate cannot be downloaded locally, keep `_preview_image` so the HTML can try a remote preview without blocking the report.
+4. For visual-complete reports, use `--image-mode screenshot` to capture a page preview for each reachable source page. This avoids empty cards, but the thumbnail is a screenshot of the source page, not the source artwork file.
+5. If neither extraction, remote preview, nor screenshot works because the page is blocked, private, or unreachable, keep the source link and show the no-image card with the failure reason.
+6. Do not replace missing cards with unrelated thumbnails.
+
+Prefer improving the reference set over forcing image extraction. If an HTML report has too many no-image cards, replace some references with high-quality sources that expose metadata images, such as Unsplash/Pexels photo pages or Behance/Dribbble pages with stable preview metadata. Keep at least a few high-value no-image references when their design value is stronger than easier thumbnails.
 
 ## Default Output Structure
 
